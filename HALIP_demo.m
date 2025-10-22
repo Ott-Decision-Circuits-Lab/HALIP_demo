@@ -2,8 +2,13 @@
 % quick matlab implementation for demo purposes (not precise)
 % TO HU Berlin 2025
 
+%if the task is termianted regularly (see GUI), data is saved in default
+% MATLAB folder HALIPDATA.mat.
+
 close all force
 clear all
+
+data=struct();         %initialize data struct
 
 %task settings
 fs=192000;             %sampling rate
@@ -12,17 +17,16 @@ noise_time = 20;       %max noise presentation time for each trial in seconds
 data.nTrials=200;      %max, can be terminated earlier
 signal_max_volume=60;  %dB SPL but arbitrary
 noise_volume=40;       %dB SPL but arbitrary
-data=struct(); %initialize data struct
 
 %prestim delay dist
-pre_stim_delay_min=0.1;
-pre_stim_delay_max=0.5;
-pre_stim_delay_tau=0.2;
+pre_stim_delay_min=0.1; %min pre-stim delay in seconds
+pre_stim_delay_max=0.5; %min pre-stim delay in seconds
+pre_stim_delay_tau=0.2; %max pre-stim delay in seconds
 pre_stim_delay_dist = makedist('Exponential','mu',pre_stim_delay_tau);
 data.pre_stim_delay_dist = truncate(pre_stim_delay_dist,pre_stim_delay_min,pre_stim_delay_max);
 
-%generate signal of varying strength
-%note: usually full random loudness between 0 and MAX,
+%generate audio of signals of varying strength
+%note: usually full random loudness between 0 and signal_max_volume,
 %      but here precalculate to save time during running trials
 data.nSNR=10;
 VOL = linspace(0,signal_max_volume,data.nSNR); %dB SPL
@@ -31,12 +35,14 @@ AUDIOPLAYERS_SIGNAL=cell(1,data.nSNR);
 for k=1:data.nSNR
     vol=VOL(k);%dB SPL
     signal(k,:,:)=GenerateSignal(vol,fs);
-    data.audioplayers_signal{k}=audioplayer(squeeze(signal(k,:,:)),fs);
+    AUDIOPLAYERS_SIGNAL{k}=audioplayer(squeeze(signal(k,:,:)),fs);
 end
+%store signal players
+data.audioplayers_signal = AUDIOPLAYERS_SIGNAL;
 
-%generate noise
+%generate audio noise
 noise = GenerateNoise(noise_volume,fs,noise_time);
-%noise player
+%store noise player
 data.noise_player = audioplayer(noise,fs);
 
 %set up GUI
@@ -49,7 +55,7 @@ handles.h_trial_count=uicontrol(handles.h_fig ,'Style','text','String','0','Unit
 handles.h_signal_cue=uicontrol(handles.h_fig ,'Style','text','String','','Units','normalized','Position',[0.45,0.8,0.1,0.15],'BackgroundColor',[.7,.7,.7]);
 handles.input_state = 0; %0=no reaction to button press
 
-%initialize data 
+%initialize data fields that are saved
 data.signal_trial=nan(data.nTrials,1);
 data.signal_level=nan(data.nTrials,1);
 data.choice=nan(data.nTrials,1);
@@ -64,6 +70,8 @@ next_trial_state(handles.h_fig);
 
 
 function f_key_press(obj,eventdata)
+%callback function for button press in GUI
+%behaves differently based on task state as in handles.data.input_state
 handles = guidata(obj);
 input_state=handles.input_state;
 data=handles.data;
@@ -110,7 +118,7 @@ switch input_state
         end
         %continue to next trial state
         handles.data=data;
-        guidata(obj, handles)        
+        guidata(obj, handles)
         next_trial_state(obj);
     case 3
         %next trial input received
@@ -122,31 +130,34 @@ switch input_state
             close(obj)
             return
         else
-        %ITI
-        handles.h_question.String='';
-        handles.h_feedback.String='';
-        pause(0.5);
-        %next trial
-        handles.data=data;
-        guidata(obj, handles)        
-        start_trial(obj);
+            %ITI
+            handles.h_question.String='';
+            handles.h_feedback.String='';
+            pause(0.5);
+            %next trial
+            handles.data=data;
+            guidata(obj, handles)
+            start_trial(obj);
         end
 end
 end
 
 function start_trial(obj)
+%starts trial (or terminates task)
 handles = guidata(obj);
 data=handles.data;
 input_state = 0;
 if data.trial>=data.nTrials
+    %terminate task
     stop(handles.data.noise_player);
     save('HALIPDATA.mat','data')
     fprintf('Task terminated. Data saved in HALIPDATA.mat.\n')
     return
 else
-    %trial count 
+    %continue to run task
+    %trial count
     data.trial = data.trial+1;
-%     disp(['trial=',num2str(data.trial)]);
+    %     disp(['trial=',num2str(data.trial)]);
     handles.h_trial_count.String=num2str(data.trial);
     handles.data=data;
     handles.input_state=input_state;
@@ -158,39 +169,41 @@ end
 end
 
 function signal_state(obj)
+%starts signal/nosignal state & playback
 handles = guidata(obj);
 data=handles.data;
 
-%pre stim delay
+%pre-stim delay
 pre_stim_delay=random(data.pre_stim_delay_dist);
 pause(pre_stim_delay);
 
 trial = data.trial;
-    %determine if signal trial or not
-    if rand(1,1)<0.5
-        %signal trial
-        data.signal_trial(trial)=1;
-        idx_snr = randi(data.nSNR);
-        data.signal_level(trial)=idx_snr;
-        %play back signal
-        handles.h_signal_cue.BackgroundColor=[.8,.2,.2];
-        play(data.audioplayers_signal{idx_snr});
-    else
-        %no-signal trial
-        handles.h_signal_cue.BackgroundColor=[.8,.2,.2];
-        data.signal_trial(trial)=0;
-        data.signal_level(trial)=0;  
-    end
-    pause(0.5);
-    handles.h_signal_cue.BackgroundColor=[.7,.7,.7];
+%determine if signal trial or not
+if rand(1,1)<0.5
+    %signal trial
+    data.signal_trial(trial)=1;
+    idx_snr = randi(data.nSNR);
+    data.signal_level(trial)=idx_snr;
+    %play back signal
+    handles.h_signal_cue.BackgroundColor=[.8,.2,.2];
+    play(data.audioplayers_signal{idx_snr});
+else
+    %no-signal trial
+    handles.h_signal_cue.BackgroundColor=[.8,.2,.2];
+    data.signal_trial(trial)=0;
+    data.signal_level(trial)=0;
+end
+pause(0.5);
+handles.h_signal_cue.BackgroundColor=[.7,.7,.7];
 
-    handles.input_state = 1; %wait for choice input
-    handles.h_question.String="Did you hear a signal? (1=yes, 0=no)";
-    handles.data=data;
-    guidata(obj, handles)
+handles.input_state = 1; %wait for choice input
+handles.h_question.String="Did you hear a signal? (1=yes, 0=no)";
+handles.data=data;
+guidata(obj, handles)
 end
 
 function confidence_state(obj)
+%starts confidence report period
 handles = guidata(obj);
 handles.h_question.String='How confidence are you? (1=low, 5=high)';
 handles.input_state=2; %wait for confidence input
@@ -198,6 +211,7 @@ guidata(obj, handles)
 end
 
 function next_trial_state(obj)
+%state to transition into next trial
 handles = guidata(obj);
 stop(handles.data.noise_player);
 play(handles.data.noise_player);
